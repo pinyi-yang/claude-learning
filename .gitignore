@@ -147,6 +147,9 @@ activemq-data/
 # SageMath parsed files
 *.sage.py
 
+# Claude Code local overrides (contain real ARNs/credentials)
+.claude/settings.local.json
+
 # Environments
 .env
 .envrc
