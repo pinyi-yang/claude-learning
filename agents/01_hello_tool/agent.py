@@ -17,7 +17,9 @@ import subprocess
 from pathlib import Path
 
 import anthropic
+from dotenv import load_dotenv
 
+load_dotenv()
 # ---------------------------------------------------------------------------
 # 1. Tool definitions — describe capabilities to the model
 #    ANTI-PATTERN: vague descriptions. The model uses these to decide WHEN
