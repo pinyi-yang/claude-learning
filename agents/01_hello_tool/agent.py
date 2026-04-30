@@ -83,6 +83,28 @@ TOOLS = [
             "required": ["path"],
         },
     },
+    {
+    "name": "run_tests",
+    "description": (
+        "Runs pytest in a given directory and returns the summary output. "
+        "Use this to check whether a project's test suite is passing or failing."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Directory to run pytest in (must contain tests or pyproject.toml).",
+            },
+            "extra_args": {
+                "type": "string",
+                "description": "Optional extra pytest args, e.g. '-x --tb=short'. Defaults to '-v --tb=short'.",
+                "default": "-v --tb=short",
+            },
+        },
+        "required": ["path"],
+    },
+},
 ]
 
 
@@ -145,6 +167,38 @@ def list_directory(path: str) -> str:
         lines.append("  ... (truncated)")
     return "\n".join(lines) or "(empty directory)"
 
+def run_tests(path: str, extra_args: str = "-v --tb=short") -> str:
+    """Run pytest in a directory and return the summary."""
+    resolved = Path(path).expanduser().resolve()
+    if not resolved.exists():
+        return f"Error: path does not exist: {resolved}"
+
+    if not shutil.which("pytest"):
+        return "Error: pytest not found on PATH. Is it installed in this environment?"
+
+    # PRODUCTION PITFALL: never use shell=True with user-supplied input.
+    # Split args manually so there's no shell injection risk.
+    args = ["pytest"] + extra_args.split() + ["--no-header", "-q"]
+
+    result = subprocess.run(
+        args,
+        cwd=resolved,
+        capture_output=True,
+        text=True,
+        timeout=60,  # tests can be slow — but cap it
+    )
+
+    # pytest exit codes:
+    #   0 = all passed, 1 = some failed, 2 = interrupted,
+    #   3 = internal error, 4 = bad CLI args, 5 = no tests collected
+    output = result.stdout + result.stderr
+
+    # Return the tail — the summary is always at the bottom, and full
+    # output can be huge. Trim to last 3000 chars to protect context window.
+    if len(output) > 3000:
+        output = "...(truncated)...\n" + output[-3000:]
+
+    return output.strip() or "(no output)"
 
 # ---------------------------------------------------------------------------
 # 3. Tool router — maps tool names to their implementations
@@ -155,6 +209,7 @@ TOOL_REGISTRY = {
     "get_git_log": get_git_log,
     "check_disk_usage": check_disk_usage,
     "list_directory": list_directory,
+    "run_tests": run_tests,
 }
 
 
@@ -219,6 +274,7 @@ Always use tools before answering — don't guess at filesystem state."""
 
         if verbose:
             print(f"Stop reason: {response.stop_reason}")
+            print(f"Input Tokens: {response.usage.input_tokens}")
 
         # Append the assistant's full response to message history
         # ANTI-PATTERN: only appending the text. You must include ALL content
@@ -271,7 +327,7 @@ if __name__ == "__main__":
     # Default to current directory; accept a path argument
     target = sys.argv[1] if len(sys.argv) > 1 else "."
 
-    prompt = f"Give me a health summary of the repository or directory at: {target}"
+    prompt = f"Are the tests passing at: {target}?"
     print(f"Prompt: {prompt}\n")
 
     result = run_agent(prompt, verbose=True)
