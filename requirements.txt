@@ -1,0 +1,5 @@
+anthropic[bedrock]>=0.40.0
+python-dotenv>=1.0.0
+
+# dev / test
+pytest>=8.0.0
