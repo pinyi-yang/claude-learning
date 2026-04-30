@@ -81,3 +81,10 @@ Multi-agent — spawns a "log analysis" subagent and a "metrics analysis" subage
 
 ![reAct-loop](reAct-loop.png)
 The structural change from 01_hello_tool is small — same loop, same tools — but two things are new: the system prompt instructs explicit reasoning, and a Trace dataclass captures every thought/action/observation so you can inspect what the agent did and why. That's the thing that makes agents debuggable in production.
+
+> Instruction-following in system prompts is unreliable for hard constraints. (limit to 3 tool calls, but agent still uses 6 calls)
+
+The reliability hierarchy for agent constraints is:
+> Code enforcement  >  structured output  >  explicit prompt  >  vague instruction
+
+Anything you actually need to guarantee — rate limits, tool call budgets, output format, timeouts — enforce it in your loop, not in natural language. Use the system prompt to shape how the model reasons, not to enforce hard limits on what it does.
