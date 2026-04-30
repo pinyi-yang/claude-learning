@@ -24,6 +24,9 @@ from pathlib import Path
 from typing import Literal
 
 import anthropic
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # 1. Trace — captures the full reasoning chain for one agent run
@@ -155,6 +158,21 @@ TOOLS = [
         },
     },
     {
+        "name": "search_file",
+        "description": (
+            "Searches for a regex pattern in a file using grep. "
+            "Use to locate specific functions, variables, or config keys without reading the whole file."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "File path to search."},
+                "pattern": {"type": "string", "description": "Regex pattern to search for."},
+            },
+            "required": ["path", "pattern"],
+        },
+    },
+    {
         "name": "read_file",
         "description": (
             "Reads a text file and returns its contents. "
@@ -224,6 +242,28 @@ def run_tests(path: str, extra_args: str = "--tb=short -q") -> str:
     return ("...(truncated)...\n" + output[-3000:]) if len(output) > 3000 else output
 
 
+def search_file(path: str, pattern: str) -> str:
+    resolved = Path(path).expanduser().resolve()
+    if not resolved.exists():
+        return f"Error: file not found: {resolved}"
+    if not resolved.is_file():
+        return f"Error: not a file: {resolved}"
+    if not shutil.which("grep"):
+        return "Error: grep not found on PATH."
+    result = subprocess.run(
+        ["grep", "-n", "--color=never", "-E", pattern, str(resolved)],
+        capture_output=True, text=True, timeout=10,
+    )
+    if result.returncode == 1:
+        return f"No matches for pattern '{pattern}' in {resolved}"
+    if result.returncode != 0:
+        return f"grep error: {result.stderr.strip()}"
+    lines = result.stdout.strip().splitlines()
+    if len(lines) > 200:
+        return "\n".join(lines[:200]) + f"\n...(truncated, {len(lines)} total matches)"
+    return result.stdout.strip()
+
+
 def read_file(path: str, max_lines: int = 100) -> str:
     resolved = Path(path).expanduser().resolve()
     if not resolved.exists():
@@ -246,6 +286,7 @@ TOOL_REGISTRY = {
     "check_disk_usage": check_disk_usage,
     "list_directory": list_directory,
     "run_tests": run_tests,
+    "search_file": search_file,
     "read_file": read_file,
 }
 
@@ -286,6 +327,7 @@ Do not call more tools than necessary — stop when you can answer confidently.
 Tool guidance:
 - Always call list_directory first on an unknown path.
 - Call run_tests only if asked about test status or if you see a tests/ directory.
+- Call search_file to locate a specific symbol or key before reading the whole file.
 - Call read_file when a config or source file is relevant to the question.
 - Return tool errors as part of your reasoning — don't silently ignore them."""
 
@@ -302,7 +344,7 @@ def run_agent(user_prompt: str, verbose: bool = True) -> Trace:
     reasoning chain, not just the final answer.
     """
     client = anthropic.AnthropicBedrock(aws_region=os.environ.get("AWS_REGION", "us-west-2"))
-    model = os.environ.get("ANTHROPIC_DEFAULT_SONNET_MODEL", "us.anthropic.claude-sonnet-4-5-v1:0")
+    model = os.environ.get("ANTHROPIC_DEFAULT_SONNET_MODEL", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
     trace = Trace(prompt=user_prompt)
     messages = [{"role": "user", "content": user_prompt}]
     max_iterations = 10
