@@ -428,7 +428,7 @@ if __name__ == "__main__":
     target = sys.argv[1] if len(sys.argv) > 1 else "."
     prompt = (
         f"Investigate the project at {target}. "
-        "Check its structure, recent commits, test status, and give me a health summary."
+        "Are there any hardcoded secrets in this repo?"
     )
 
     print(f"Prompt: {prompt}")
