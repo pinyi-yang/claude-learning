@@ -3,14 +3,14 @@
 
 New patterns vs 02_react_loop:
   1. MCP servers passed directly to Anthropic API — no TOOL_REGISTRY for MCP tools
-  2. Two-phase loop: investigate (read-only GitLab) → act (write GitHub)
+  2. Two-phase loop: investigate (read-only GitHub Actions) → act (write GitHub)
   3. Tool allowlisting per phase — model only sees tools it's allowed to use
   4. Local tools alongside MCP tools — format_ci_report runs in your process
   5. Phase handoff via structured JSON — investigation result feeds action prompt
 
 Architecture:
   Phase 1 (investigate):
-    - MCP: gitlab (5 read-only tools)
+    - MCP: github (3 read-only tools for GitHub Actions)
     - Local: none
     - Goal: produce structured JSON report of failures
 
@@ -31,9 +31,8 @@ import anthropic
 from dotenv import load_dotenv
 
 from config import (
-    gitlab_mcp_server,
     github_mcp_server,
-    GITLAB_INVESTIGATE_TOOLS,
+    GITHUB_INVESTIGATE_TOOLS,
     GITHUB_ACT_TOOLS,
 )
 from prompts import INVESTIGATE_SYSTEM, ACT_SYSTEM
@@ -241,12 +240,12 @@ def run_agent(
 ) -> Trace:
     """
     Full CI triage run:
-      Phase 1 — investigate: what failed in the GitLab pipeline?
+      Phase 1 — investigate: what failed in the GitHub Actions workflow?
       Phase 2 — act: post findings as a GitHub PR comment
 
     Args:
-        project_id:      GitLab project ID or path (e.g. "myorg/myrepo")
-        pipeline_id:     GitLab pipeline ID (e.g. "12345678")
+        project_id:      GitHub repo in "owner/repo" format
+        pipeline_id:     GitHub Actions workflow run ID
         github_repo:     GitHub repo in "owner/repo" format
         github_pr_number: PR number to comment on
     """
@@ -260,14 +259,14 @@ def run_agent(
 
     # ------------------------------------------------------------------
     # Phase 1: Investigate
-    # Only GitLab read tools visible — model cannot write anything
+    # Only GitHub Actions read tools visible — model cannot write anything
     # ------------------------------------------------------------------
     print("\n" + "="*60)
     print("PHASE 1: INVESTIGATE")
     print("="*60)
 
     investigate_prompt = (
-        f"Investigate GitLab pipeline {pipeline_id} in project '{project_id}'. "
+        f"Investigate GitHub Actions workflow run {pipeline_id} in repo '{project_id}'. "
         f"Determine what failed, why, and produce the structured JSON report."
     )
 
@@ -277,7 +276,7 @@ def run_agent(
         client=client,
         system=INVESTIGATE_SYSTEM,
         messages=investigate_messages,
-        mcp_servers=[gitlab_mcp_server(GITLAB_INVESTIGATE_TOOLS)],
+        mcp_servers=[github_mcp_server(GITHUB_INVESTIGATE_TOOLS)],
         phase="investigate",
         trace=trace,
         max_iterations=8,

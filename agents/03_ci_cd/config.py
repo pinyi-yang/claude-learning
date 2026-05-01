@@ -17,27 +17,6 @@ load_dotenv()
 # MCP server definitions
 # ---------------------------------------------------------------------------
 
-def gitlab_mcp_server(allowed_tools: list[str]) -> dict:
-    """
-    GitLab MCP server config for the Anthropic API.
-
-    Auth: GitLab personal access token with read_api scope.
-    Docs: https://gitlab.com/gitlab-org/gitlab-mcp
-    """
-    token = os.getenv("GITLAB_TOKEN")
-    if not token:
-        raise ValueError("GITLAB_TOKEN not set in environment.")
-
-    return {
-        "type": "url",
-        "url": "https://gitlab.com/api/mcp",   # GitLab's hosted MCP endpoint
-        "name": "gitlab",
-        "allowed_tools": allowed_tools,
-        # Auth header — GitLab MCP uses Bearer token
-        "authorization_token": token,
-    }
-
-
 def github_mcp_server(allowed_tools: list[str]) -> dict:
     """
     GitHub MCP server config for the Anthropic API.
@@ -58,34 +37,27 @@ def github_mcp_server(allowed_tools: list[str]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Tool allowlists — the core of our tool limitation strategy.
+# Tool allowlists — each phase only sees the tools it needs.
 #
-# PRINCIPLE: each phase only sees the tools it needs.
-#   - Investigation phase: read-only GitLab tools
-#   - Action phase: write-only GitHub tools
-#
-# This enforces a trust boundary in code, not just in prompts.
+# PRINCIPLE: investigation phase is read-only, act phase is write-only.
 # The model literally cannot post a comment during investigation.
 # ---------------------------------------------------------------------------
 
-# Phase 1: understand what failed
-GITLAB_INVESTIGATE_TOOLS = [
-    "list_project_pipelines",   # find recent pipelines for a project
-    "get_pipeline",             # status, stages, timing for one pipeline
-    "list_pipeline_jobs",       # jobs within a pipeline
-    "get_job_log",              # raw log for a specific job
-    "list_merge_requests",      # find the MR that triggered this pipeline
+# Phase 1: understand what failed in GitHub Actions
+GITHUB_INVESTIGATE_TOOLS = [
+    "actions_list",   # list workflow runs for the PR; list jobs within a run
+    "actions_get",    # get details of a specific run or job
+    "get_job_logs",   # fetch raw log content for a failed job
 ]
 
 # Phase 2: report findings
 GITHUB_ACT_TOOLS = [
-    "create_pull_request_review",   # post a structured review
-    "add_pull_request_review_comment",  # inline comment on specific line
-    "create_issue",                 # fallback: open an issue instead
+    "create_pull_request_review",         # post a structured review
+    "add_pull_request_review_comment",    # inline comment on specific line
+    "create_issue",                       # fallback: open an issue instead
 ]
 
 # For local tools (non-MCP) that supplement the agent
-# These are defined in tools/local.py and passed as regular tools
 LOCAL_TOOLS = [
     "format_ci_report",    # formats findings into a structured comment body
 ]

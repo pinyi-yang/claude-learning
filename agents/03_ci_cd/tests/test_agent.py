@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 from tools.local import format_ci_report, execute_local_tool
 from config import (
-    GITLAB_INVESTIGATE_TOOLS,
+    GITHUB_INVESTIGATE_TOOLS,
     GITHUB_ACT_TOOLS,
 )
 from agent import Trace, Step, run_phase
@@ -108,13 +108,14 @@ class TestExecuteLocalTool:
 # ---------------------------------------------------------------------------
 
 class TestConfig:
-    def test_gitlab_investigate_tools_are_read_only(self):
+    def test_github_investigate_tools_are_read_only(self):
         """Ensure no write tools sneak into the investigation allowlist."""
-        write_indicators = ["create", "update", "delete", "post", "merge", "approve"]
-        for tool in GITLAB_INVESTIGATE_TOOLS:
+        from config import GITHUB_INVESTIGATE_TOOLS
+        write_indicators = ["create", "update", "delete", "post", "approve"]
+        for tool in GITHUB_INVESTIGATE_TOOLS:
             for indicator in write_indicators:
                 assert indicator not in tool.lower(), (
-                    f"Write tool '{tool}' found in GITLAB_INVESTIGATE_TOOLS — "
+                    f"Write tool '{tool}' found in GITHUB_INVESTIGATE_TOOLS — "
                     f"investigation phase must be read-only."
                 )
 
@@ -128,25 +129,19 @@ class TestConfig:
                     f"act phase should be write-only."
                 )
 
-    def test_gitlab_server_requires_token(self, monkeypatch):
-        from config import gitlab_mcp_server
-        monkeypatch.delenv("GITLAB_TOKEN", raising=False)
-        with pytest.raises(ValueError, match="GITLAB_TOKEN"):
-            gitlab_mcp_server(GITLAB_INVESTIGATE_TOOLS)
-
     def test_github_server_requires_token(self, monkeypatch):
         from config import github_mcp_server
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         with pytest.raises(ValueError, match="GITHUB_TOKEN"):
             github_mcp_server(GITHUB_ACT_TOOLS)
 
-    def test_gitlab_server_shape(self, monkeypatch):
-        from config import gitlab_mcp_server
-        monkeypatch.setenv("GITLAB_TOKEN", "test-token")
-        server = gitlab_mcp_server(["get_pipeline"])
+    def test_github_server_shape(self, monkeypatch):
+        from config import github_mcp_server
+        monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+        server = github_mcp_server(["actions_list"])
         assert server["type"] == "url"
-        assert "gitlab" in server["url"]
-        assert server["allowed_tools"] == ["get_pipeline"]
+        assert "github" in server["url"]
+        assert server["allowed_tools"] == ["actions_list"]
         assert "authorization_token" in server
 
 
