@@ -234,7 +234,6 @@ def run_phase(
 def run_agent(
     repo: str,
     pr_number: int,
-    verbose: bool = True,
 ) -> Trace:
     """
     Full CI triage run:
@@ -293,7 +292,7 @@ def run_agent(
         print(f"\nInvestigation complete: {trace.investigation_report.get('summary', '')}")
     except json.JSONDecodeError:
         print(f"\nWarning: could not parse investigation JSON. Raw result:\n{investigation_result[:500]}")
-        report_json = json.dumps({"summary": investigation_result, "failed_jobs": [], "pipeline_id": "unknown"})
+        report_json = json.dumps({"summary": investigation_result, "failed_jobs": [], "pipeline_id": str(pr_number)})
 
     # ------------------------------------------------------------------
     # Phase 2: Act

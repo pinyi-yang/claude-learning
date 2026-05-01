@@ -236,7 +236,7 @@ class TestRunPhase:
             mock_cls.return_value = client
             # Always return a tool call
             client.messages.create.return_value = self._make_response([
-                self._tool_block("list_project_pipelines", {"project_id": "test"})
+                self._tool_block("actions_list", {"owner": "test", "repo": "proj"})
             ], stop_reason="tool_use")
 
             trace = self._make_trace()
