@@ -10,7 +10,7 @@ New patterns vs 02_react_loop:
 
 Architecture:
   Phase 1 (investigate):
-    - MCP: github (3 read-only tools for GitHub Actions)
+    - MCP: github (3 read-only Actions tools)
     - Local: none
     - Goal: produce structured JSON report of failures
 
@@ -56,8 +56,8 @@ class Step:
 
 @dataclass
 class Trace:
-    project_id: str
-    pipeline_id: str
+    repo: str
+    pr_number: int
     github_pr: str
     steps: list[Step] = field(default_factory=list)
     investigation_report: dict | None = None  # structured JSON from phase 1
@@ -71,8 +71,8 @@ class Trace:
 
     def to_dict(self) -> dict:
         return {
-            "project_id": self.project_id,
-            "pipeline_id": self.pipeline_id,
+            "repo": self.repo,
+            "pr_number": self.pr_number,
             "github_pr": self.github_pr,
             "investigation_report": self.investigation_report,
             "comment_posted": self.comment_posted,
@@ -89,7 +89,7 @@ class Trace:
 
     def pretty_print(self) -> None:
         print(f"\n{'='*60}")
-        print(f"TRACE — project={self.project_id} pipeline={self.pipeline_id}")
+        print(f"TRACE — repo={self.repo} pr=#{self.pr_number}")
         for step in self.steps:
             tag = f"[{step.phase.upper()}:{step.kind.upper()}]"
             if step.kind == "thought":
@@ -232,29 +232,25 @@ def run_phase(
 # ---------------------------------------------------------------------------
 
 def run_agent(
-    project_id: str,
-    pipeline_id: str,
-    github_repo: str,
-    github_pr_number: int,
+    repo: str,
+    pr_number: int,
     verbose: bool = True,
 ) -> Trace:
     """
     Full CI triage run:
-      Phase 1 — investigate: what failed in the GitHub Actions workflow?
+      Phase 1 — investigate: what failed in the GitHub Actions run?
       Phase 2 — act: post findings as a GitHub PR comment
 
     Args:
-        project_id:      GitHub repo in "owner/repo" format
-        pipeline_id:     GitHub Actions workflow run ID
-        github_repo:     GitHub repo in "owner/repo" format
-        github_pr_number: PR number to comment on
+        repo:       GitHub repo in "owner/repo" format (e.g. "myorg/myrepo")
+        pr_number:  PR number to investigate and comment on
     """
     client = anthropic.AnthropicBedrock(aws_region=os.environ.get("AWS_REGION", "us-west-2"))
 
     trace = Trace(
-        project_id=project_id,
-        pipeline_id=pipeline_id,
-        github_pr=f"{github_repo}#{github_pr_number}",
+        repo=repo,
+        pr_number=pr_number,
+        github_pr=f"{repo}#{pr_number}",
     )
 
     # ------------------------------------------------------------------
@@ -266,8 +262,9 @@ def run_agent(
     print("="*60)
 
     investigate_prompt = (
-        f"Investigate GitHub Actions workflow run {pipeline_id} in repo '{project_id}'. "
-        f"Determine what failed, why, and produce the structured JSON report."
+        f"Investigate the GitHub Actions CI failures on PR #{pr_number} "
+        f"in repo '{repo}'. Find the most recent failed workflow run, "
+        f"identify which jobs failed and why, and produce the structured JSON report."
     )
 
     investigate_messages = [{"role": "user", "content": investigate_prompt}]
@@ -285,7 +282,6 @@ def run_agent(
 
     # Extract JSON from the investigation result
     # PRODUCTION PITFALL: models sometimes wrap JSON in markdown fences.
-    # Always strip them before parsing.
     report_json = investigation_result
     if "```json" in report_json:
         report_json = report_json.split("```json")[1].split("```")[0].strip()
@@ -297,20 +293,19 @@ def run_agent(
         print(f"\nInvestigation complete: {trace.investigation_report.get('summary', '')}")
     except json.JSONDecodeError:
         print(f"\nWarning: could not parse investigation JSON. Raw result:\n{investigation_result[:500]}")
-        # Continue anyway — the act phase will get the raw text
-        report_json = json.dumps({"summary": investigation_result, "failed_jobs": [], "pipeline_id": pipeline_id})
+        report_json = json.dumps({"summary": investigation_result, "failed_jobs": [], "pipeline_id": "unknown"})
 
     # ------------------------------------------------------------------
     # Phase 2: Act
-    # Only GitHub write tools visible — model cannot read GitLab anymore
+    # Only GitHub write tools visible — model cannot read anymore
     # ------------------------------------------------------------------
     print("\n" + "="*60)
     print("PHASE 2: ACT")
     print("="*60)
 
     act_prompt = (
-        f"Post a CI triage report as a comment on GitHub PR #{github_pr_number} "
-        f"in repo '{github_repo}'.\n\n"
+        f"Post a CI triage report as a comment on GitHub PR #{pr_number} "
+        f"in repo '{repo}'.\n\n"
         f"Investigation findings:\n```json\n{report_json}\n```\n\n"
         f"Use format_ci_report to format the comment body, then post it."
     )
@@ -325,7 +320,7 @@ def run_agent(
         phase="act",
         trace=trace,
         max_iterations=4,
-        max_tool_calls=3,  # tight budget — should only need 2 calls
+        max_tool_calls=3,
     )
 
     trace.comment_posted = "posted" in act_result.lower() or "comment" in act_result.lower()
@@ -341,30 +336,22 @@ def run_agent(
 if __name__ == "__main__":
     import sys
 
-    # Usage: python agent.py <project_id> <pipeline_id> <github_repo> <pr_number>
-    # Example: python agent.py myorg/myrepo 12345678 myorg/myrepo 42
-    if len(sys.argv) < 5:
-        print("Usage: python agent.py <gitlab_project_id> <pipeline_id> <github_repo> <pr_number>")
-        print("Example: python agent.py myorg/backend 98765432 myorg/backend 123")
+    # Usage: python agent.py <repo> <pr_number>
+    # Example: python agent.py pinyi-yang/claude-learning 4
+    if len(sys.argv) < 3:
+        print("Usage: python agent.py <repo> <pr_number>")
+        print("Example: python agent.py pinyi-yang/claude-learning 4")
         sys.exit(1)
 
-    project_id = sys.argv[1]
-    pipeline_id = sys.argv[2]
-    github_repo = sys.argv[3]
-    pr_number = int(sys.argv[4])
+    repo = sys.argv[1]
+    pr_number = int(sys.argv[2])
 
-    trace = run_agent(
-        project_id=project_id,
-        pipeline_id=pipeline_id,
-        github_repo=github_repo,
-        github_pr_number=pr_number,
-    )
+    trace = run_agent(repo=repo, pr_number=pr_number)
 
     trace.pretty_print()
 
-    # Save trace
     import json as _json
     from pathlib import Path
-    trace_path = Path(f"trace_{pipeline_id}.json")
+    trace_path = Path(f"trace_pr{pr_number}.json")
     trace_path.write_text(_json.dumps(trace.to_dict(), indent=2))
     print(f"\nTrace saved: {trace_path}")

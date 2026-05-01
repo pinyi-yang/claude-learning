@@ -171,7 +171,7 @@ class TestRunPhase:
         return b
 
     def _make_trace(self):
-        return Trace(project_id="test/proj", pipeline_id="999", github_pr="test/proj#1")
+        return Trace(repo="test/proj", pr_number=1, github_pr="test/proj#1")
 
     def test_single_turn_no_tools(self):
         with patch("agent.anthropic.Anthropic") as mock_cls:
