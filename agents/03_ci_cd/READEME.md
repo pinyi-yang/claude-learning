@@ -1,91 +1,66 @@
-# 03_cicd_monitor
+# 03 — CI/CD Triage Agent
 
-Two-phase CI/CD triage agent using Anthropic MCP proxy.
+Two-phase agent that investigates GitHub Actions CI failures on a PR and posts a triage comment.
 
-Investigates GitLab pipeline failures → posts findings to GitHub PR.
+## What it demonstrates
 
-## What's new vs 02_react_loop
+1. **MCP servers via Anthropic API** — no manual tool schemas for GitHub tools
+2. **Tool allowlisting per phase** — investigation phase is read-only; act phase is write-only
+3. **Phase handoff via structured JSON** — investigation output feeds the act prompt
+4. **Local tools alongside MCP tools** — `format_ci_report` runs in-process
 
-| | 02_react_loop | 03_cicd_monitor |
-|---|---|---|
-| Tools | Built-in (local) | MCP (remote) + local |
-| Tool execution | Your code | Anthropic API (MCP) + your code (local) |
-| Phases | Single | Two: investigate → act |
-| Tool visibility | All tools always | Allowlisted per phase |
-| Trust boundary | None | Read-only investigate, write-only act |
-| Output | Terminal | GitHub PR comment |
+## Architecture
 
-## Key concepts
-
-**Tool allowlisting** — each phase passes `allowed_tools` to the MCP server.
-The model only sees tools it's allowed to call. Investigation phase cannot
-post comments; act phase cannot read GitLab. Enforced by the API, not prompts.
-
-**Local + MCP tools together** — `format_ci_report` is a local tool (you execute it).
-GitLab and GitHub tools are MCP (Anthropic executes them). Both appear in the same
-loop; you distinguish them by checking if the tool name is in `LOCAL_TOOL_SCHEMAS`.
-
-**Two-phase handoff** — the investigation result is structured JSON that feeds
-the act phase prompt. This decouples reading from writing and makes each phase
-independently testable.
+```
+Phase 1 (investigate)              Phase 2 (act)
+  MCP: GitHub Actions tools    →     MCP: GitHub write tools
+  - actions_list                     - create_pull_request_review
+  - actions_get                      - add_pull_request_review_comment
+  - get_job_logs                     - create_issue
+  Local: none                        Local: format_ci_report
+  Output: structured JSON            Output: PR comment posted
+```
 
 ## Setup
 
-```bash
-uv sync --extra dev
+1. Copy `.env.example` to `.env` and fill in:
+   - `GITHUB_TOKEN` — GitHub PAT with `repo` scope
+   - `AWS_REGION` and Bedrock model ARNs (or `ANTHROPIC_API_KEY` for direct API)
 
-# Required tokens
-echo "GITLAB_TOKEN=glpat-xxxx"   >> .env   # read_api scope
-echo "GITHUB_TOKEN=github_pat_xx" >> .env  # repo scope (for PR comments)
-echo "ANTHROPIC_API_KEY=sk-ant-xx" >> .env
-```
+2. Install dependencies from the repo root:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 ## Run
 
 ```bash
-uv run python agent.py <gitlab_project_id> <pipeline_id> <github_repo> <pr_number>
+cd agents/03_ci_cd
+python agent.py <owner/repo> <pr_number>
 
-# Example:
-uv run python agent.py myorg/backend 98765432 myorg/backend 123
+# Example — triage PR #4 in this repo:
+python agent.py pinyi-yang/claude-learning 4
 ```
 
-## Test
+The agent will:
+1. Find the latest failed GitHub Actions run on the PR
+2. List failed jobs and fetch their logs
+3. Produce a structured JSON triage report
+4. Format and post it as a PR comment
+
+Trace is saved to `trace_pr<pr_number>.json`.
+
+## Tests
 
 ```bash
-uv run pytest tests/ -v
+PYTHONPATH=agents/03_ci_cd python -m pytest agents/03_ci_cd/tests/ -v
 ```
 
-## File structure
-
-```
-agent.py         — two-phase loop, MCP config, trace
-config.py        — MCP server builders, tool allowlists
-prompts.py       — system prompts (separated for easy iteration)
-tools/
-  local.py       — format_ci_report (runs in your process)
-tests/
-  test_agent.py  — unit + integration tests, no real API calls
-```
+Tests use mocked Anthropic clients — no API calls, no tokens needed.
 
 ## What to try next
 
-1. **Tighten the allowlist further.** Remove one tool from
-   `GITLAB_INVESTIGATE_TOOLS` and observe how the agent adapts.
-   Does it find a workaround? Does quality drop?
-
-2. **Add a router call.** Before phase 1, make a cheap `claude-haiku`
-   call that reads the pipeline summary and decides which 3 tools are
-   most likely needed. Pass only those. Measure token savings.
-
-3. **Add a flakiness detector.** If the same job has failed 3+ times
-   in recent pipelines with different error messages, classify it as
-   `flaky` rather than a real regression. Add a `list_project_pipelines`
-   call to check history.
-
-4. **Write a deterministic eval.** Create a fixture with a known
-   GitLab pipeline JSON response and assert that the agent correctly
-   classifies the failure type. This is your first eval harness.
-
-5. **Add human-in-the-loop.** Before posting the GitHub comment, print
-   the formatted comment and ask for confirmation. This is a preview
-   of the pattern you'll use in 07_release_manager.
+1. Run the agent against a real PR with a failing CI job
+2. Add a third MCP tool to Phase 1 (e.g. `list_repos`) and observe how tool allowlisting prevents it from being used in Phase 2
+3. Extend `format_ci_report` to include a flakiness score based on job history
+4. Add a Phase 3: auto-open a Jira ticket for `high` confidence failures
